@@ -4,6 +4,16 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prd
 
 env:
   IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lab8-nginx
@@ -19,7 +29,10 @@ jobs:
       - name: Resolve environment and image tag
         id: meta
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "tag=sha-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+            echo "env=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
             echo "env=prd" >> $GITHUB_OUTPUT
           else
