@@ -1,0 +1,64 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+env:
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lab8-nginx
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+
+      - name: Resolve environment and image tag
+        id: meta
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "env=prd" >> $GITHUB_OUTPUT
+          else
+            echo "tag=sha-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+            echo "env=dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+
+      - name: Checkout helm chart repo
+        uses: actions/checkout@v4
+        with:
+          repository: abdenourbarache/lab6
+          token: ${{ secrets.GH_PAT }}
+          path: helm-repo
+
+      - name: Update image tag in values file
+        run: |
+          cd helm-repo
+          VALUES_FILE="values-${{ steps.meta.outputs.env }}.yaml"
+          yq e '.image.repository = "${{ env.IMAGE_NAME }}"' -i $VALUES_FILE
+          yq e '.image.tag = "${{ steps.meta.outputs.tag }}"' -i $VALUES_FILE
+
+      - name: Commit and push helm chart update
+        run: |
+          cd helm-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add values-${{ steps.meta.outputs.env }}.yaml
+          git diff --cached --quiet || git commit -m "ci: update ${{ steps.meta.outputs.env }} image to ${{ steps.meta.outputs.tag }}"
+          git push
